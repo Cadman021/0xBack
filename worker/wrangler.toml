@@ -1,0 +1,10 @@
+name = "veloce-telegram-webhook"
+main = "telegram_webhook.js"
+compatibility_date = "2024-09-01"
+
+[vars]
+GITHUB_REPO = "USERNAME/REPO"
+ALLOWED_CHAT_ID = "-100XXXXXXXXXX"
+# GITHUB_TOKEN و TG_SECRET رو با دستور زیر به‌صورت secret ست کن (اینجا ننویس):
+#   npx wrangler secret put GITHUB_TOKEN
+#   npx wrangler secret put TG_SECRET

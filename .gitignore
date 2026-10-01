@@ -1,0 +1,20 @@
+# ⚠️ فایل‌های session تلگرام = دسترسی کامل به اکانتت. هرگز commit نشن.
+*.session
+*.session-journal
+.env
+
+# فایل‌هایی که هر اجرا از نو ساخته می‌شن
+raw_configs.json
+personal_configs.json
+dispatch_configs.json
+valid_configs.json
+*.lock
+temp_cfg_*.json
+public/
+bin/
+xray
+xray.exe
+xray.zip
+geoip.dat
+geosite.dat
+__pycache__/

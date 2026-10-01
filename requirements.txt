@@ -1,0 +1,5 @@
+aiohttp>=3.9
+aiohttp-socks>=0.8
+beautifulsoup4>=4.12
+filelock>=3.13
+python-dotenv>=1.0

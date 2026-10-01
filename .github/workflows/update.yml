@@ -1,0 +1,114 @@
+name: Update configs
+
+on:
+  schedule:
+    - cron: "7 * * * *"        # هر ساعت، دقیقه‌ی ۷ (دقیقه‌ی ۰ شلوغه و cron دیرتر اجرا می‌شه)
+  workflow_dispatch:            # اجرای دستی از تب Actions
+  repository_dispatch:
+    types: [new-config]         # از طرف بات تلگرام (worker/telegram_webhook.js)
+  push:
+    branches: [main]
+    paths:
+      - "custom_configs.json"   # هر وقت کانفیگ دستی اضافه کردی، فوری اجرا بشه
+
+permissions:
+  contents: read
+  pages: write
+  id-token: write
+
+# هیچ‌وقت دو اجرا هم‌زمان نباشن (state روی هم نوشته نشه)
+concurrency:
+  group: veloce-pipeline
+  cancel-in-progress: false
+
+jobs:
+  update:
+    runs-on: ubuntu-latest
+    timeout-minutes: 50
+    environment:
+      name: github-pages
+      url: ${{ steps.deploy.outputs.page_url }}
+
+    env:
+      XRAY_PATH: ${{ github.workspace }}/bin/xray
+      TELEGRAM_CHANNELS: ${{ vars.TELEGRAM_CHANNELS || 'ConfigsHUB' }}
+      TELEGRAM_PERSONAL_CHANNEL: ${{ vars.TELEGRAM_PERSONAL_CHANNEL }}
+      LIMIT_MESSAGES: ${{ vars.LIMIT_MESSAGES || '200' }}
+      TEST_CONCURRENCY: ${{ vars.TEST_CONCURRENCY || '16' }}
+      CUSTOM_CONFIGS: ${{ secrets.CUSTOM_CONFIGS }}
+      XRAY_VERSION: ${{ vars.XRAY_VERSION || 'latest' }}
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+          cache: pip
+
+      - name: Install Python deps
+        run: pip install -r requirements.txt
+
+      - name: Install Xray-core
+        run: |
+          if [ "$XRAY_VERSION" = "latest" ]; then
+            URL="https://github.com/XTLS/Xray-core/releases/latest/download/Xray-linux-64.zip"
+          else
+            URL="https://github.com/XTLS/Xray-core/releases/download/${XRAY_VERSION}/Xray-linux-64.zip"
+          fi
+          mkdir -p bin
+          curl -fsSL "$URL" -o xray.zip
+          unzip -o -q xray.zip -d bin
+          chmod +x bin/xray
+          bin/xray version | head -1
+
+      - name: Restore previous state
+        env:
+          STATE_URL: ${{ vars.STATE_URL || format('https://{0}.github.io/{1}/state/valid_configs.json', github.repository_owner, github.event.repository.name) }}
+        run: |
+          if curl -fsSL "$STATE_URL" -o valid_configs.json && python -c "import json;json.load(open('valid_configs.json'))"; then
+            echo "✅ state بازیابی شد: $(python -c "import json;print(len(json.load(open('valid_configs.json'))))") کانفیگ"
+          else
+            echo "ℹ️ state قبلی پیدا نشد (اولین اجرا؟) — از صفر شروع می‌کنیم"
+            echo "[]" > valid_configs.json
+          fi
+
+      - name: Save configs sent by Telegram bot
+        if: github.event_name == 'repository_dispatch'
+        env:
+          PAYLOAD: ${{ toJson(github.event.client_payload.configs) }}
+        run: |
+          python - <<'PY'
+          import json, os
+          data = json.loads(os.environ.get("PAYLOAD") or "[]") or []
+          data = [c for c in data if isinstance(c, str)][:100]
+          json.dump(data, open("dispatch_configs.json", "w"))
+          print(f"📨 {len(data)} کانفیگ از بات تلگرام دریافت شد")
+          PY
+
+      - name: Run pipeline (scrape → test → publish)
+        run: python pipeline.py
+
+      - uses: actions/configure-pages@v5
+
+      - uses: actions/upload-pages-artifact@v3
+        with:
+          path: public
+
+      - name: Deploy to GitHub Pages
+        id: deploy
+        uses: actions/deploy-pages@v4
+
+      # اختیاری: آینه روی Cloudflare Pages (اگه github.io برای کاربرها فیلتر بود).
+      # فقط وقتی اجرا می‌شه که سکرت CLOUDFLARE_API_TOKEN ست شده باشه.
+      - name: Mirror to Cloudflare Pages
+        env:
+          CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+          CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
+          CF_PAGES_PROJECT: ${{ vars.CF_PAGES_PROJECT || 'veloce-api' }}
+        run: |
+          if [ -z "$CLOUDFLARE_API_TOKEN" ]; then
+            echo "Cloudflare تنظیم نشده، رد شد."
+            exit 0
+          fi
+          npx --yes wrangler@3 pages deploy public --project-name="$CF_PAGES_PROJECT" --branch=main
